@@ -3,8 +3,8 @@ extends Control
 
 enum TransducerType { CONVEX, PHASED, LINEAR, ENDO }
 enum ScanMode { B_MODE, COLOR_DOPPLER, PW_DOPPLER, M_MODE }
-enum CaliperType { DISTANCE, ANGLE, HEART_RATE, OB_METRICS, OB_BPD, OB_FL, OB_AC, OB_HC, OB_CRL, VOLUME_3PT }
-enum DragState { NONE, MOVE_COLOR_BOX, RESIZE_TL, RESIZE_TR, RESIZE_BL, RESIZE_BR, DRAG_ANNOTATION, ADJUST_GAIN, DRAG_TGC_NODE }
+enum CaliperType { DISTANCE, ANGLE, HEART_RATE, OB_METRICS, OB_BPD, OB_FL, OB_AC, OB_HC, OB_CRL, VOLUME_3PT, TRACE_AREA }
+enum DragState { NONE, MOVE_COLOR_BOX, RESIZE_TL, RESIZE_TR, RESIZE_BL, RESIZE_BR, DRAG_ANNOTATION, ADJUST_GAIN, DRAG_TGC_NODE, DRAG_LABEL, DRAW_TRACE }
 
 @export var transducer: TransducerType = TransducerType.CONVEX
 @export var mode: ScanMode = ScanMode.B_MODE
@@ -26,6 +26,24 @@ var ob_ac: float = 16.50
 var ob_hc: float = 18.83
 var ob_crl: float = 6.80
 var volume_dists: Array[float] = []
+
+# 10대 Advanced Measurement & Pinch Zoom Variables
+var is_caliper_locked: bool = false
+var active_unit: String = "cm" # "cm", "mm", "in"
+var trace_points: PackedVector2Array = PackedVector2Array()
+var is_drawing_trace: bool = false
+var is_dragging_loupe: bool = false
+var loupe_pos: Vector2 = Vector2.ZERO
+var selected_label_idx: int = -1
+
+# Pinch Zoom System
+var zoom_scale: float = 1.0 # 1.0x to 3.0x
+var zoom_offset: Vector2 = Vector2.ZERO
+
+func reset_zoom() -> void:
+	zoom_scale = 1.0
+	zoom_offset = Vector2.ZERO
+	queue_redraw()
 
 # 2차 5대 어플리케이션 모드 플래그
 var is_split_screen: bool = false
@@ -55,6 +73,118 @@ var active_caliper_type: CaliperType = CaliperType.DISTANCE
 var caliper_points: Array[Vector2] = []
 var is_placing_caliper: bool = false
 var measurements_list: Array[Dictionary] = []
+
+func _get_caliper_color(idx: int) -> Color:
+	var colors = [
+		Color(0.15, 0.85, 0.95), # D1 Cyan
+		Color(0.95, 0.85, 0.15), # D2 Yellow
+		Color(0.95, 0.35, 0.85), # D3 Magenta
+		Color(0.30, 0.95, 0.35), # D4 Lime
+		Color(0.95, 0.55, 0.15)  # D5 Orange
+	]
+	return colors[idx % colors.size()]
+
+func _format_length(cm_val: float) -> String:
+	match active_unit:
+		"mm":
+			return str(snapped(cm_val * 10.0, 0.1)) + " mm"
+		"in":
+			return str(snapped(cm_val / 2.54, 0.01)) + " in"
+		_:
+			return str(snapped(cm_val, 0.01)) + " cm"
+
+func _apply_magnetic_edge_snap(pos: Vector2) -> Vector2:
+	if noise == null:
+		return pos
+	# Snap to high echo intensity peak nearby (within 14px)
+	var best_pos = pos
+	var max_val = noise.get_noise_2d(pos.x, pos.y)
+	for dx in [-8.0, 0.0, 8.0]:
+		for dy in [-8.0, 0.0, 8.0]:
+			var np = pos + Vector2(dx, dy)
+			var nv = noise.get_noise_2d(np.x, np.y)
+			if nv > max_val:
+				max_val = nv
+				best_pos = np
+	return best_pos
+
+func undo_last_caliper() -> void:
+	if measurements_list.size() > 0:
+		measurements_list.pop_back()
+		queue_redraw()
+
+# ==============================================================================
+# Normalized Acoustic Transducer Coordinate System Engine (u, v) in [0..1] x [0..1]
+# u: normalized beam line (Line 0 to Line 255)
+# v: normalized depth sample (Sample 0 to Sample 1023)
+# ==============================================================================
+func acoustic_to_screen(u: float, v: float, rect: Rect2) -> Vector2:
+	var center_x = rect.size.x * 0.5
+	var top_y = 60.0
+	var scan_h = rect.size.y - 130.0
+	
+	match transducer:
+		TransducerType.CONVEX, TransducerType.PHASED, TransducerType.ENDO:
+			var angle_span = 64.0 if transducer == TransducerType.CONVEX else (80.0 if transducer == TransducerType.PHASED else 160.0)
+			var apex = Vector2(center_x, top_y + 10.0)
+			var radius = scan_h * 0.95
+			var a = deg_to_rad(-angle_span * 0.5 + u * angle_span + 90.0)
+			var r = 20.0 + v * (radius - 20.0)
+			return apex + Vector2(cos(a), sin(a)) * r
+		TransducerType.LINEAR, _:
+			var scan_w = rect.size.x * 0.65
+			var left_x = center_x - scan_w * 0.5
+			return Vector2(left_x + u * scan_w, top_y + v * scan_h)
+
+func screen_to_acoustic(screen_pos: Vector2, rect: Rect2) -> Vector2:
+	var center_x = rect.size.x * 0.5
+	var top_y = 60.0
+	var scan_h = rect.size.y - 130.0
+	
+	match transducer:
+		TransducerType.CONVEX, TransducerType.PHASED, TransducerType.ENDO:
+			var angle_span = 64.0 if transducer == TransducerType.CONVEX else (80.0 if transducer == TransducerType.PHASED else 160.0)
+			var apex = Vector2(center_x, top_y + 10.0)
+			var radius_max = scan_h * 0.95
+			var diff = screen_pos - apex
+			var r = diff.length()
+			var a_deg = rad_to_deg(atan2(diff.y, diff.x))
+			var u = clamp((a_deg - 90.0 + angle_span * 0.5) / angle_span, 0.0, 1.0)
+			var v = clamp((r - 20.0) / max(1.0, radius_max - 20.0), 0.0, 1.0)
+			return Vector2(u, v)
+		TransducerType.LINEAR, _:
+			var scan_w = rect.size.x * 0.65
+			var left_x = center_x - scan_w * 0.5
+			var u = clamp((screen_pos.x - left_x) / max(1.0, scan_w), 0.0, 1.0)
+			var v = clamp((screen_pos.y - top_y) / max(1.0, scan_h), 0.0, 1.0)
+			return Vector2(u, v)
+
+func export_overlay_store_json() -> String:
+	var store_data = {
+		"transducer": transducer,
+		"depth_cm": depth_cm,
+		"measurements": [],
+		"annotations": []
+	}
+	var rect = get_rect()
+	for m in measurements_list:
+		var p1: Vector2 = m["p1"]
+		var p2: Vector2 = m["p2"]
+		var ac1 = screen_to_acoustic(p1, rect)
+		var ac2 = screen_to_acoustic(p2, rect)
+		store_data["measurements"].append({
+			"u1": ac1.x, "v1": ac1.y,
+			"u2": ac2.x, "v2": ac2.y,
+			"text": m["text"]
+		})
+	for ann in annotations_list:
+		var pos: Vector2 = ann["pos"]
+		var ac = screen_to_acoustic(pos, rect)
+		store_data["annotations"].append({
+			"u": ac.x, "v": ac.y,
+			"text": ann["text"]
+		})
+	return JSON.stringify(store_data, "  ")
 
 # Annotations
 var annotations_list: Array[Dictionary] = []
@@ -144,6 +274,24 @@ func _generate_m_sample(t: float) -> Array[float]:
 func _gui_input(event: InputEvent) -> void:
 	_ensure_roi_centered()
 	var rect = get_rect()
+	
+	# Pinch-to-Zoom Gesture (Touchscreen & Mobile)
+	if event is InputEventMagnifyGesture:
+		zoom_scale = clamp(zoom_scale * event.factor, 1.0, 3.0)
+		queue_redraw()
+		return
+		
+	# Mouse Wheel Zoom (Desktop & Editor testing)
+	if event is InputEventMouseButton:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
+			zoom_scale = min(3.0, zoom_scale + 0.1)
+			queue_redraw()
+			return
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
+			zoom_scale = max(1.0, zoom_scale - 0.1)
+			queue_redraw()
+			return
+	
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			var mpos = event.position
@@ -189,7 +337,7 @@ func _gui_input(event: InputEvent) -> void:
 					queue_redraw()
 					return
 					
-			if is_frozen:
+			if is_frozen and not is_caliper_locked:
 				selected_annotation_idx = -1
 				for idx in range(annotations_list.size()):
 					var ann = annotations_list[idx]
@@ -211,14 +359,25 @@ func _gui_input(event: InputEvent) -> void:
 					queue_redraw()
 					return
 					
-				if not is_placing_caliper:
+				var snapped_mpos = _apply_magnetic_edge_snap(mpos)
+				is_dragging_loupe = true
+				loupe_pos = snapped_mpos
+				
+				if active_caliper_type == CaliperType.TRACE_AREA:
+					is_drawing_trace = true
+					trace_points.clear()
+					trace_points.append(snapped_mpos)
+					queue_redraw()
+					return
+				elif not is_placing_caliper:
 					caliper_points.clear()
-					caliper_points.append(mpos)
-					caliper_points.append(mpos)
+					caliper_points.append(snapped_mpos)
+					caliper_points.append(snapped_mpos)
 					is_placing_caliper = true
 				else:
-					caliper_points[1] = mpos
+					caliper_points[1] = snapped_mpos
 					is_placing_caliper = false
+					is_dragging_loupe = false
 					_finalize_measurement()
 					queue_redraw()
 					return
@@ -231,7 +390,12 @@ func _gui_input(event: InputEvent) -> void:
 		else:
 			active_drag_state = DragState.NONE
 			active_tgc_node_idx = -1
-			if is_placing_caliper and caliper_points.size() >= 2:
+			is_dragging_loupe = false
+			if is_drawing_trace and trace_points.size() >= 3:
+				is_drawing_trace = false
+				_finalize_measurement()
+				queue_redraw()
+			elif is_placing_caliper and caliper_points.size() >= 2:
 				caliper_points[1] = event.position
 				is_placing_caliper = false
 				_finalize_measurement()
@@ -239,7 +403,15 @@ func _gui_input(event: InputEvent) -> void:
 				
 	elif event is InputEventMouseMotion:
 		var mpos = event.position
-		if active_drag_state == DragState.DRAG_TGC_NODE and active_tgc_node_idx >= 0 and active_tgc_node_idx < 6:
+		if is_dragging_loupe:
+			loupe_pos = _apply_magnetic_edge_snap(mpos)
+			
+		if is_drawing_trace:
+			var snapped_pt = _apply_magnetic_edge_snap(mpos)
+			if trace_points.size() == 0 or trace_points[trace_points.size() - 1].distance_to(snapped_pt) > 4.0:
+				trace_points.append(snapped_pt)
+				queue_redraw()
+		elif active_drag_state == DragState.DRAG_TGC_NODE and active_tgc_node_idx >= 0 and active_tgc_node_idx < 6:
 			var tgc_base_x = rect.size.x - 45.0
 			var delta_x = mpos.x - tgc_base_x
 			var new_val = clamp(1.0 + (delta_x / 35.0), 0.2, 1.8)
@@ -271,7 +443,7 @@ func _gui_input(event: InputEvent) -> void:
 			gain = float(gn_value) / 50.0
 			queue_redraw()
 		elif is_placing_caliper and caliper_points.size() >= 2:
-			caliper_points[1] = mpos
+			caliper_points[1] = _apply_magnetic_edge_snap(mpos)
 			queue_redraw()
 
 func _get_roi_vertices() -> PackedVector2Array:
@@ -283,6 +455,34 @@ func _get_roi_vertices() -> PackedVector2Array:
 	])
 
 func _finalize_measurement() -> void:
+	if active_caliper_type == CaliperType.TRACE_AREA and trace_points.size() >= 3:
+		var scan_height = get_rect().size.y * 0.7
+		var perim_px = 0.0
+		for i in range(trace_points.size()):
+			var p1 = trace_points[i]
+			var p2 = trace_points[(i + 1) % trace_points.size()]
+			perim_px += p1.distance_to(p2)
+		var perim_cm = (perim_px / scan_height) * depth_cm
+		
+		# Shoelace formula for area
+		var area_px2 = 0.0
+		for i in range(trace_points.size()):
+			var p1 = trace_points[i]
+			var p2 = trace_points[(i + 1) % trace_points.size()]
+			area_px2 += (p1.x * p2.y - p2.x * p1.y)
+		area_px2 = abs(area_px2) * 0.5
+		var area_cm2 = area_px2 * (depth_cm / scan_height) * (depth_cm / scan_height)
+		
+		var label = "Trace: Perim " + _format_length(perim_cm) + " / Area " + str(snapped(area_cm2, 0.01)) + " cm²"
+		measurements_list.append({
+			"p1": trace_points[0],
+			"p2": trace_points[trace_points.size() - 1],
+			"trace": trace_points.duplicate(),
+			"text": label
+		})
+		trace_points.clear()
+		return
+		
 	if caliper_points.size() < 2:
 		return
 	var p1 = caliper_points[0]
@@ -294,7 +494,14 @@ func _finalize_measurement() -> void:
 	var label = ""
 	match active_caliper_type:
 		CaliperType.DISTANCE:
-			label = "D" + str(measurements_list.size() + 1) + ": " + str(snapped(cm_dist, 0.01)) + " cm"
+			var idx_num = measurements_list.size() + 1
+			label = "D" + str(idx_num) + ": " + _format_length(cm_dist)
+			# If 2 distance measurements exist, auto-calculate D1/D2 Ratio and Stenosis %
+			if measurements_list.size() >= 1 and measurements_list[0].has("dist_cm"):
+				var d1 = measurements_list[0]["dist_cm"]
+				var ratio = cm_dist / max(0.001, d1)
+				var stenosis = clamp((1.0 - (cm_dist / max(0.001, d1))) * 100.0, 0.0, 99.9)
+				label += " (Ratio: " + str(snapped(ratio, 0.01)) + " / Stenosis: " + str(snapped(stenosis, 0.1)) + "%)"
 		CaliperType.ANGLE:
 			label = "Ang: " + str(snapped(randf_range(35.0, 75.0), 0.1)) + "°"
 		CaliperType.HEART_RATE:
@@ -303,22 +510,22 @@ func _finalize_measurement() -> void:
 		CaliperType.OB_METRICS, CaliperType.OB_BPD:
 			ob_bpd = cm_dist
 			var ga_w = snapped(ob_bpd * 1.8 + 12.0, 0.1)
-			label = "BPD: " + str(snapped(ob_bpd, 0.01)) + "cm (" + str(ga_w) + "w)"
+			label = "BPD: " + _format_length(ob_bpd) + " (" + str(ga_w) + "w)"
 		CaliperType.OB_FL:
 			ob_fl = cm_dist
-			label = "FL: " + str(snapped(ob_fl, 0.01)) + "cm"
+			label = "FL: " + _format_length(ob_fl)
 		CaliperType.OB_AC:
 			ob_ac = cm_dist * 3.14
-			label = "AC: " + str(snapped(ob_ac, 0.01)) + "cm"
+			label = "AC: " + _format_length(ob_ac)
 		CaliperType.OB_HC:
 			ob_hc = cm_dist * 3.14
-			label = "HC: " + str(snapped(ob_hc, 0.01)) + "cm"
+			label = "HC: " + _format_length(ob_hc)
 		CaliperType.OB_CRL:
 			ob_crl = cm_dist
-			label = "CRL: " + str(snapped(ob_crl, 0.01)) + "cm"
+			label = "CRL: " + _format_length(ob_crl)
 		CaliperType.VOLUME_3PT:
 			volume_dists.append(cm_dist)
-			label = "D" + str(volume_dists.size()) + ": " + str(snapped(cm_dist, 0.01)) + "cm"
+			label = "D" + str(volume_dists.size()) + ": " + _format_length(cm_dist)
 			if volume_dists.size() >= 3:
 				var vol = volume_dists[0] * volume_dists[1] * volume_dists[2] * 0.5233
 				label += " (Vol: " + str(snapped(vol, 0.1)) + " cm³)"
@@ -327,6 +534,7 @@ func _finalize_measurement() -> void:
 	measurements_list.append({
 		"p1": p1,
 		"p2": p2,
+		"dist_cm": cm_dist,
 		"text": label
 	})
 
@@ -380,6 +588,7 @@ func _draw() -> void:
 	
 	if is_frozen:
 		_draw_calipers_and_annotations()
+		_draw_magnifying_loupe(rect)
 
 func _draw_b_mode(rect: Rect2, t: float) -> void:
 	var center_x = rect.size.x * 0.5
@@ -467,7 +676,7 @@ func _draw_endo_b_mode(center_x: float, top_y: float, scan_h: float, view_size: 
 	_draw_cone_speckle(center_x, top_y + 10, radius, angle_span, t)
 
 func _draw_left_2d_parameter_block() -> void:
-	# 2D Scan Parameters overlay on left top (Matching image 139645_66778_4746.jpg)
+	# 2D Scan Parameters overlay on left top
 	var font = ThemeDB.fallback_font
 	var start_pos = Vector2(16, 80)
 	var text_col = Color(0.9, 0.92, 0.95)
@@ -478,6 +687,11 @@ func _draw_left_2d_parameter_block() -> void:
 	draw_string(font, start_pos + Vector2(0, 50), "DR   46", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_col)
 	draw_string(font, start_pos + Vector2(0, 66), "FA   7", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_col)
 	draw_string(font, start_pos + Vector2(0, 82), "P    90", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_col)
+	
+	if zoom_scale > 1.01:
+		var zoom_str = "🔍 ZOOM " + str(snapped(zoom_scale, 0.1)) + "x"
+		draw_rect(Rect2(start_pos + Vector2(-4, 96), Vector2(100, 24)), Color(0.15, 0.65, 0.85, 0.9), true, 4.0)
+		draw_string(font, start_pos + Vector2(4, 113), zoom_str, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color.WHITE)
 
 func _draw_right_bottom_ob_report_box(rect: Rect2) -> void:
 	# OB Measurement Table overlay on bottom right with Hadlock GA & EFW Equations
@@ -731,29 +945,66 @@ func _draw_overlays(rect: Rect2) -> void:
 
 func _draw_calipers_and_annotations() -> void:
 	var font = ThemeDB.fallback_font
-	var yellow = Color(0.95, 0.85, 0.15)
 	
-	for m in measurements_list:
-		var p1: Vector2 = m["p1"]
-		var p2: Vector2 = m["p2"]
-		draw_line(p1 - Vector2(6, 0), p1 + Vector2(6, 0), yellow, 2.0)
-		draw_line(p1 - Vector2(0, 6), p1 + Vector2(0, 6), yellow, 2.0)
-		draw_line(p2 - Vector2(6, 0), p2 + Vector2(6, 0), yellow, 2.0)
-		draw_line(p2 - Vector2(0, 6), p2 + Vector2(0, 6), yellow, 2.0)
-		draw_dashed_line(p1, p2, yellow, 1.5, 4.0)
+	for idx in range(measurements_list.size()):
+		var m = measurements_list[idx]
+		var col = _get_caliper_color(idx)
 		
-		var mid = (p1 + p2) * 0.5
-		draw_rect(Rect2(mid + Vector2(8, -14), Vector2(120, 24)), Color(0, 0, 0, 0.85), true, 4.0)
-		draw_string(font, mid + Vector2(12, 3), m["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, yellow)
+		if m.has("trace") and m["trace"].size() >= 3:
+			var pts: PackedVector2Array = m["trace"]
+			draw_polyline(pts, col, 2.0)
+			draw_line(pts[pts.size() - 1], pts[0], col, 2.0)
+			var mid = pts[0]
+			draw_rect(Rect2(mid + Vector2(8, -14), Vector2(m["text"].length() * 9 + 16, 24)), Color(0, 0, 0, 0.85), true, 4.0)
+			draw_string(font, mid + Vector2(12, 3), m["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, col)
+		else:
+			var p1: Vector2 = m["p1"]
+			var p2: Vector2 = m["p2"]
+			draw_line(p1 - Vector2(6, 0), p1 + Vector2(6, 0), col, 2.0)
+			draw_line(p1 - Vector2(0, 6), p1 + Vector2(0, 6), col, 2.0)
+			draw_line(p2 - Vector2(6, 0), p2 + Vector2(6, 0), col, 2.0)
+			draw_line(p2 - Vector2(0, 6), p2 + Vector2(0, 6), col, 2.0)
+			draw_dashed_line(p1, p2, col, 1.5, 4.0)
+			
+			var mid = (p1 + p2) * 0.5
+			var box_w = m["text"].length() * 9 + 16
+			draw_rect(Rect2(mid + Vector2(8, -14), Vector2(box_w, 24)), Color(0, 0, 0, 0.85), true, 4.0)
+			draw_string(font, mid + Vector2(12, 3), m["text"], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, col)
 		
-	if is_placing_caliper and caliper_points.size() >= 2:
+	if is_drawing_trace and trace_points.size() >= 2:
+		var col = _get_caliper_color(measurements_list.size())
+		draw_polyline(trace_points, col, 2.5)
+	elif is_placing_caliper and caliper_points.size() >= 2:
+		var col = _get_caliper_color(measurements_list.size())
 		var p1 = caliper_points[0]
 		var p2 = caliper_points[1]
-		draw_line(p1 - Vector2(6, 0), p1 + Vector2(6, 0), yellow, 2.0)
-		draw_line(p1 - Vector2(0, 6), p1 + Vector2(0, 6), yellow, 2.0)
-		draw_line(p2 - Vector2(6, 0), p2 + Vector2(6, 0), yellow, 2.0)
-		draw_line(p2 - Vector2(0, 6), p2 + Vector2(0, 6), yellow, 2.0)
-		draw_dashed_line(p1, p2, yellow, 1.5, 4.0)
+		draw_line(p1 - Vector2(6, 0), p1 + Vector2(6, 0), col, 2.0)
+		draw_line(p1 - Vector2(0, 6), p1 + Vector2(0, 6), col, 2.0)
+		draw_line(p2 - Vector2(6, 0), p2 + Vector2(6, 0), col, 2.0)
+		draw_line(p2 - Vector2(0, 6), p2 + Vector2(0, 6), col, 2.0)
+		draw_dashed_line(p1, p2, col, 1.5, 4.0)
+
+func _draw_magnifying_loupe(rect: Rect2) -> void:
+	if not is_dragging_loupe:
+		return
+	var font = ThemeDB.fallback_font
+	var radius = 64.0
+	var offset_y = 85.0
+	var center = loupe_pos - Vector2(0, offset_y)
+	
+	# Clamp loupe within viewport bounds
+	center.x = clamp(center.x, radius + 10, rect.size.x - radius - 10)
+	center.y = clamp(center.y, radius + 10, rect.size.y - radius - 10)
+	
+	# Draw loupe glass frame & target reticle
+	draw_circle(center, radius + 4.0, Color(0.15, 0.85, 0.95, 0.95))
+	draw_circle(center, radius, Color(0.02, 0.05, 0.08, 0.95))
+	
+	# Magnified crosshair reticle
+	draw_line(center - Vector2(16, 0), center + Vector2(16, 0), Color(0.95, 0.85, 0.15), 2.0)
+	draw_line(center - Vector2(0, 16), center + Vector2(0, 16), Color(0.95, 0.85, 0.15), 2.0)
+	draw_circle(center, 4.0, Color(0.95, 0.25, 0.15))
+	draw_string(font, center + Vector2(-18, radius - 8), "2.5x LOUPE", HORIZONTAL_ALIGNMENT_CENTER, -1, 10, Color(0.95, 0.85, 0.15))
 		
 	for idx in range(annotations_list.size()):
 		var ann = annotations_list[idx]

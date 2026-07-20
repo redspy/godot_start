@@ -258,6 +258,7 @@ func _setup_popups() -> void:
 	
 	caliper_popup.clear()
 	caliper_popup.add_item("📏 Distance (D1/D2 cm)", 0)
+	caliper_popup.add_item("✏️ Freehand Trace (Area & Perim.)", 10)
 	caliper_popup.add_item("📐 Angle (°)", 1)
 	caliper_popup.add_item("❤️ Heart Rate (HR BPM)", 2)
 	caliper_popup.add_item("👶 OB BPD (Hadlock GA)", 4)
