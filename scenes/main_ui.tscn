@@ -1,0 +1,446 @@
+[gd_scene load_steps=7 format=3 uid="uid://b8vscanairmainui01"]
+
+[ext_resource type="Script" path="res://scripts/ui_manager.gd" id="1_uimanager"]
+[ext_resource type="Script" path="res://scripts/ultrasound_viewport.gd" id="2_viewport"]
+[ext_resource type="Script" path="res://scripts/exam_manager.gd" id="3_exammanager"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_topbar"]
+bg_color = Color(0.02, 0.04, 0.06, 0.98)
+border_width_bottom = 2
+border_color = Color(0.12, 0.65, 0.6, 0.85)
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_panel"]
+bg_color = Color(0.06, 0.09, 0.12, 0.96)
+border_width_left = 3
+border_width_right = 3
+border_color = Color(0.16, 0.24, 0.28, 1)
+corner_radius_top_left = 10
+corner_radius_bottom_left = 10
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_bottombar"]
+bg_color = Color(0.02, 0.04, 0.06, 0.98)
+border_width_top = 2
+border_color = Color(0.18, 0.28, 0.32, 1)
+
+[node name="MainUI" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_uimanager")
+
+[node name="Background" type="ColorRect" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.0, 0.0, 0.0, 1)
+
+[node name="ViewportContainer" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_top = 96
+theme_override_constants/margin_bottom = 96
+
+[node name="UltrasoundViewport" type="Control" parent="ViewportContainer"]
+layout_mode = 2
+script = ExtResource("2_viewport")
+
+[node name="TopBar" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 10
+anchor_right = 1.0
+offset_bottom = 96.0
+grow_horizontal = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_topbar")
+
+[node name="VBox" type="VBoxContainer" parent="TopBar"]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="Row1" type="HBoxContainer" parent="TopBar/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="MarginLeft" type="Control" parent="TopBar/VBox/Row1"]
+custom_minimum_size = Vector2(8, 0)
+layout_mode = 2
+
+[node name="BrandLabel" type="Label" parent="TopBar/VBox/Row1"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.18, 0.75, 0.95, 1)
+theme_override_font_sizes/font_size = 19
+text = "SAMSUNG ULTRASOUND"
+
+[node name="ProbeMenuBtn" type="Button" parent="TopBar/VBox/Row1"]
+custom_minimum_size = Vector2(130, 44)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 15
+text = " 🔍 Convex "
+
+[node name="ModeBadge" type="Label" parent="TopBar/VBox/Row1"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14, 0.85, 0.75, 1)
+theme_override_font_sizes/font_size = 17
+text = "B-MODE"
+
+[node name="ExamsBtn" type="Button" parent="TopBar/VBox/Row1"]
+custom_minimum_size = Vector2(120, 44)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 15
+text = " EXAMS 📁 "
+
+[node name="RotateBtn" type="Button" parent="TopBar/VBox/Row1"]
+custom_minimum_size = Vector2(110, 44)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 15
+text = " 🔄 ROTATE "
+
+[node name="Spacer" type="Control" parent="TopBar/VBox/Row1"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="TIMILabel" type="Label" parent="TopBar/VBox/Row1"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.95, 0.95, 0.95, 1)
+theme_override_font_sizes/font_size = 15
+text = "MI 1.0   TIb 0.3  TIs 0.3"
+
+[node name="HarLabel" type="Label" parent="TopBar/VBox/Row1"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.75, 0.85, 0.9, 1)
+theme_override_font_sizes/font_size = 14
+text = "[ S | HAR ]"
+
+[node name="MarginRight" type="Control" parent="TopBar/VBox/Row1"]
+custom_minimum_size = Vector2(8, 0)
+layout_mode = 2
+
+[node name="Row2" type="HBoxContainer" parent="TopBar/VBox"]
+layout_mode = 2
+
+[node name="MarginLeft2" type="Control" parent="TopBar/VBox/Row2"]
+custom_minimum_size = Vector2(12, 0)
+layout_mode = 2
+
+[node name="SubHeaderLabel" type="Label" parent="TopBar/VBox/Row2"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.85, 0.9, 0.95, 1)
+theme_override_font_sizes/font_size = 14
+text = "OB / 2nd Trimester / CA1-7A / FR28Hz / 8.9cm"
+
+[node name="BottomBar" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -96.0
+grow_horizontal = 2
+grow_vertical = 0
+theme_override_styles/panel = SubResource("StyleBoxFlat_bottombar")
+
+[node name="HBox" type="HBoxContainer" parent="BottomBar"]
+layout_mode = 2
+theme_override_constants/separation = 12
+alignment = 1
+
+[node name="ModeBtn" type="Button" parent="BottomBar/HBox"]
+custom_minimum_size = Vector2(140, 60)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 16
+text = "SCAN MODE"
+
+[node name="VSeparator1" type="VSeparator" parent="BottomBar/HBox"]
+layout_mode = 2
+
+[node name="FreezeBtn" type="Button" parent="BottomBar/HBox"]
+custom_minimum_size = Vector2(170, 64)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 19
+text = "❄️ FREEZE"
+
+[node name="VSeparator2" type="VSeparator" parent="BottomBar/HBox"]
+layout_mode = 2
+
+[node name="CaliperBtn" type="Button" parent="BottomBar/HBox"]
+custom_minimum_size = Vector2(130, 60)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 16
+text = "📏 CALIPER"
+
+[node name="AnnotationBtn" type="Button" parent="BottomBar/HBox"]
+custom_minimum_size = Vector2(130, 60)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 16
+text = "🏷️ TEXT"
+
+[node name="ClearToolsBtn" type="Button" parent="BottomBar/HBox"]
+custom_minimum_size = Vector2(100, 60)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 15
+text = "CLEAR"
+
+[node name="VSeparator3" type="VSeparator" parent="BottomBar/HBox"]
+layout_mode = 2
+
+[node name="StoreBtn" type="Button" parent="BottomBar/HBox"]
+custom_minimum_size = Vector2(140, 60)
+layout_mode = 2
+size_flags_vertical = 4
+theme_override_font_sizes/font_size = 16
+text = "📷 STORE"
+
+[node name="CineContainer" type="HBoxContainer" parent="BottomBar/HBox"]
+visible = false
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="CineLabel" type="Label" parent="BottomBar/HBox/CineContainer"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 15
+text = "CINE LOOP:"
+
+[node name="CineSlider" type="HSlider" parent="BottomBar/HBox/CineContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 4
+max_value = 59.0
+
+[node name="LeftPanel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 9
+anchor_bottom = 1.0
+offset_top = 96.0
+offset_right = 380.0
+offset_bottom = -96.0
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="VBox" type="VBoxContainer" parent="LeftPanel"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="MenuTitle" type="HBoxContainer" parent="LeftPanel/VBox"]
+layout_mode = 2
+
+[node name="ProbeIconBtn" type="Button" parent="LeftPanel/VBox/MenuTitle"]
+custom_minimum_size = Vector2(48, 48)
+layout_mode = 2
+text = "✖"
+
+[node name="TitleLabel" type="Label" parent="LeftPanel/VBox/MenuTitle"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14, 0.85, 0.75, 1)
+theme_override_font_sizes/font_size = 18
+text = "PROBE & SCAN CONTROLS"
+
+[node name="HSeparator" type="HSeparator" parent="LeftPanel/VBox"]
+layout_mode = 2
+
+[node name="TransducerLabel" type="Label" parent="LeftPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "Transducer Head:"
+
+[node name="TransducerOption" type="OptionButton" parent="LeftPanel/VBox"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+
+[node name="PresetLabel" type="Label" parent="LeftPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "Clinical Preset:"
+
+[node name="PresetOption" type="OptionButton" parent="LeftPanel/VBox"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+
+[node name="GainLabel" type="Label" parent="LeftPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "Gain (Contrast/Brightness):"
+
+[node name="GainSlider" type="HSlider" parent="LeftPanel/VBox"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+min_value = 0.2
+max_value = 2.0
+step = 0.05
+value = 1.0
+
+[node name="DepthLabel" type="Label" parent="LeftPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "Depth (Scan Range cm):"
+
+[node name="DepthSlider" type="HSlider" parent="LeftPanel/VBox"]
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+min_value = 4.0
+max_value = 24.0
+step = 1.0
+value = 8.9
+
+[node name="TGCHeader" type="Label" parent="LeftPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "TGC Controls (6-Band Depth Gain):"
+
+[node name="TGCBox" type="HBoxContainer" parent="LeftPanel/VBox"]
+custom_minimum_size = Vector2(0, 120)
+layout_mode = 2
+alignment = 1
+
+[node name="TGC1" type="VSlider" parent="LeftPanel/VBox/TGCBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+value = 50.0
+
+[node name="TGC2" type="VSlider" parent="LeftPanel/VBox/TGCBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+value = 50.0
+
+[node name="TGC3" type="VSlider" parent="LeftPanel/VBox/TGCBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+value = 50.0
+
+[node name="TGC4" type="VSlider" parent="LeftPanel/VBox/TGCBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+value = 50.0
+
+[node name="TGC5" type="VSlider" parent="LeftPanel/VBox/TGCBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+value = 50.0
+
+[node name="TGC6" type="VSlider" parent="LeftPanel/VBox/TGCBox"]
+layout_mode = 2
+size_flags_horizontal = 3
+value = 50.0
+
+[node name="CenterlineCheck" type="CheckBox" parent="LeftPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+button_pressed = true
+text = "Centerline Marker"
+
+[node name="FocusCheck" type="CheckBox" parent="LeftPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+button_pressed = true
+text = "Focus Indicator"
+
+[node name="FlipCheck" type="CheckBox" parent="LeftPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 16
+text = "Cardiac L/R Flip"
+
+[node name="RightPanel" type="PanelContainer" parent="."]
+layout_mode = 1
+anchors_preset = 11
+anchor_left = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = 96.0
+offset_right = 380.0
+offset_bottom = -96.0
+grow_horizontal = 0
+grow_vertical = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_panel")
+
+[node name="VBox" type="VBoxContainer" parent="RightPanel"]
+layout_mode = 2
+theme_override_constants/separation = 14
+
+[node name="PanelTitle" type="Label" parent="RightPanel/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.14, 0.85, 0.75, 1)
+theme_override_font_sizes/font_size = 18
+text = "EXAM MANAGEMENT & GALLERY"
+
+[node name="HSeparator" type="HSeparator" parent="RightPanel/VBox"]
+layout_mode = 2
+
+[node name="ExamIdLabel" type="Label" parent="RightPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "Exam ID: EXAM-0000"
+
+[node name="PatientLabel" type="Label" parent="RightPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "Patient Name / Medical ID:"
+
+[node name="PatientNameInput" type="LineEdit" parent="RightPanel/VBox"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+placeholder_text = "Anonymous Patient"
+
+[node name="GalleryTitle" type="Label" parent="RightPanel/VBox"]
+layout_mode = 2
+theme_override_font_sizes/font_size = 17
+text = "Captured Media Gallery:"
+
+[node name="Scroll" type="ScrollContainer" parent="RightPanel/VBox"]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="GalleryGrid" type="GridContainer" parent="RightPanel/VBox/Scroll"]
+layout_mode = 2
+columns = 2
+
+[node name="EndExamBtn" type="Button" parent="RightPanel/VBox"]
+custom_minimum_size = Vector2(0, 52)
+layout_mode = 2
+theme_override_font_sizes/font_size = 18
+text = "END EXAM & EXPORT DICOM"
+
+[node name="ExamManager" type="Node" parent="."]
+script = ExtResource("3_exammanager")
+
+[node name="ExportDialog" type="AcceptDialog" parent="."]
+title = "Exam Complete & Export Summary"
+
+[node name="ViewerDialog" type="AcceptDialog" parent="."]
+title = "Media Viewer"
+
+[node name="VBox" type="VBoxContainer" parent="ViewerDialog"]
+offset_left = 8.0
+offset_top = 8.0
+offset_right = 612.0
+offset_bottom = 391.0
+
+[node name="ViewerTexture" type="TextureRect" parent="ViewerDialog/VBox"]
+custom_minimum_size = Vector2(600, 340)
+layout_mode = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="ProbePopup" type="PopupMenu" parent="."]
+
+[node name="CaliperPopup" type="PopupMenu" parent="."]
+
+[node name="AnnotationPopup" type="PopupMenu" parent="."]

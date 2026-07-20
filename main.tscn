@@ -1,34 +1,8 @@
 [gd_scene load_steps=2 format=3 uid="uid://c8n5q7x0h0j1a"]
 
-[sub_resource type="GDScript" id="GDScript_tap"]
-script/source = "extends Label
-
-var taps := 0
-
-func _ready() -> void:
-	text = \"Tap the screen!\"
-
-func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventScreenTouch and event.pressed:
-		taps += 1
-		text = \"Taps: %d\" % taps
-	elif event is InputEventMouseButton and event.pressed:
-		taps += 1
-		text = \"Taps: %d\" % taps
-"
+[ext_resource type="PackedScene" uid="uid://b8vscanairmainui01" path="res://scenes/main_ui.tscn" id="1_mainui"]
 
 [node name="Main" type="Node2D"]
 
-[node name="Background" type="ColorRect" parent="."]
-offset_right = 1080.0
-offset_bottom = 2340.0
-color = Color(0.121569, 0.156863, 0.223529, 1)
-
-[node name="Label" type="Label" parent="."]
-offset_left = 40.0
-offset_top = 40.0
-offset_right = 1040.0
-offset_bottom = 120.0
-theme_override_font_sizes/font_size = 64
-horizontal_alignment = 1
-script = SubResource("GDScript_tap")
+[node name="MainUI" parent="." instance=ExtResource("1_mainui")]
+custom_minimum_size = Vector2(1080, 720)

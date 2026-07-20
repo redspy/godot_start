@@ -12,10 +12,20 @@ config_version=5
 [application]
 
 config/name="Godot Start"
-run/main_scene="res://main.tscn"
+run/main_scene="res://scenes/main_ui.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
 
 [rendering]
 
 renderer/rendering_method="mobile"
 textures/vram_compression/import_etc2_astc=true
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/resizable=true
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/handheld/orientation="sensor"
+
