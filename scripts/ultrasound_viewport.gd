@@ -3,8 +3,8 @@ extends Control
 
 enum TransducerType { CONVEX, PHASED, LINEAR, ENDO }
 enum ScanMode { B_MODE, COLOR_DOPPLER, PW_DOPPLER, M_MODE }
-enum CaliperType { DISTANCE, ANGLE, HEART_RATE, OB_METRICS }
-enum DragState { NONE, MOVE_COLOR_BOX, RESIZE_TL, RESIZE_TR, RESIZE_BL, RESIZE_BR, DRAG_ANNOTATION, ADJUST_GAIN }
+enum CaliperType { DISTANCE, ANGLE, HEART_RATE, OB_METRICS, OB_BPD, OB_FL, OB_AC, OB_HC, OB_CRL, VOLUME_3PT }
+enum DragState { NONE, MOVE_COLOR_BOX, RESIZE_TL, RESIZE_TR, RESIZE_BL, RESIZE_BR, DRAG_ANNOTATION, ADJUST_GAIN, DRAG_TGC_NODE }
 
 @export var transducer: TransducerType = TransducerType.CONVEX
 @export var mode: ScanMode = ScanMode.B_MODE
@@ -19,13 +19,36 @@ enum DragState { NONE, MOVE_COLOR_BOX, RESIZE_TL, RESIZE_TR, RESIZE_BL, RESIZE_B
 var gn_value: int = 50 # Default 50 (range 0..100)
 var drag_start_gn_value: int = 50
 
+# Advanced OB GA/EFW Calculation Variables (Hadlock Equations)
+var ob_bpd: float = 5.20
+var ob_fl: float = 3.60
+var ob_ac: float = 16.50
+var ob_hc: float = 18.83
+var ob_crl: float = 6.80
+var volume_dists: Array[float] = []
+
+# 2차 5대 어플리케이션 모드 플래그
+var is_split_screen: bool = false
+var is_efast_mode: bool = false
+var efast_regions: Array[String] = ["RUQ (Morison)", "LUQ (Splenorenal)", "Cardiac (Subxiphoid)", "Pelvis (Suprapubic)", "Right Pleural", "Left Pleural"]
+var efast_results: Array[String] = ["CLEAR", "CLEAR", "CLEAR", "CLEAR", "CLEAR", "CLEAR"]
+
 # TGC 6-band controls (0.2 to 1.8)
 var tgc_bands: Array[float] = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+var active_tgc_node_idx: int = -1
+var show_tgc_curve: bool = true
 
-# Cine loop frame buffer
+# Cine loop frame buffer & player
 var cine_frames: Array[float] = []
 var cine_max_frames: int = 60
 var cine_index: int = 59
+var is_cine_playing: bool = false
+var cine_speed: float = 1.0 # 0.5x, 1.0x, 2.0x
+var cine_timer: float = 0.0
+
+# BodyMark 픽토그램 오버레이 (0: None, 1: Abdomen/Liver, 2: Heart, 3: Kidney, 4: Carotid, 5: Thyroid)
+var active_bodymark_id: int = 0
+var bodymark_names: Array[String] = ["None", "Abdomen", "Heart (PLAX)", "Kidney", "Carotid Artery", "Thyroid"]
 
 # Caliper & Measurement
 var active_caliper_type: CaliperType = CaliperType.DISTANCE
@@ -83,6 +106,12 @@ func _process(delta: float) -> void:
 			m_mode_history.pop_front()
 			
 		queue_redraw()
+	elif is_cine_playing and cine_frames.size() > 0:
+		cine_timer += delta * cine_speed * 18.0
+		if cine_timer >= 1.0:
+			cine_timer = 0.0
+			cine_index = (cine_index + 1) % cine_frames.size()
+			queue_redraw()
 
 func _ensure_roi_centered() -> void:
 	var rect = get_rect()
@@ -114,9 +143,25 @@ func _generate_m_sample(t: float) -> Array[float]:
 
 func _gui_input(event: InputEvent) -> void:
 	_ensure_roi_centered()
+	var rect = get_rect()
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			var mpos = event.position
+			
+			# Check interactive TGC 6-node touch selection (Right edge)
+			var top_y = 70.0
+			var scan_h = rect.size.y - 140.0
+			var tgc_base_x = rect.size.x - 45.0
+			for i in range(6):
+				var ny = top_y + (float(i) / 5.0) * scan_h
+				var offset_x = (tgc_bands[i] - 1.0) * 35.0
+				var node_pos = Vector2(tgc_base_x + offset_x, ny)
+				if mpos.distance_to(node_pos) <= 16.0 or (mpos.x > rect.size.x - 90 and abs(mpos.y - ny) < 25):
+					active_tgc_node_idx = i
+					active_drag_state = DragState.DRAG_TGC_NODE
+					drag_start_mouse_pos = mpos
+					queue_redraw()
+					return
 			
 			if mode == ScanMode.COLOR_DOPPLER and not is_frozen:
 				var vertices = _get_roi_vertices()
@@ -185,6 +230,7 @@ func _gui_input(event: InputEvent) -> void:
 				drag_start_gn_value = gn_value
 		else:
 			active_drag_state = DragState.NONE
+			active_tgc_node_idx = -1
 			if is_placing_caliper and caliper_points.size() >= 2:
 				caliper_points[1] = event.position
 				is_placing_caliper = false
@@ -193,7 +239,13 @@ func _gui_input(event: InputEvent) -> void:
 				
 	elif event is InputEventMouseMotion:
 		var mpos = event.position
-		if active_drag_state == DragState.MOVE_COLOR_BOX:
+		if active_drag_state == DragState.DRAG_TGC_NODE and active_tgc_node_idx >= 0 and active_tgc_node_idx < 6:
+			var tgc_base_x = rect.size.x - 45.0
+			var delta_x = mpos.x - tgc_base_x
+			var new_val = clamp(1.0 + (delta_x / 35.0), 0.2, 1.8)
+			tgc_bands[active_tgc_node_idx] = new_val
+			queue_redraw()
+		elif active_drag_state == DragState.MOVE_COLOR_BOX:
 			var delta = mpos - drag_start_mouse_pos
 			color_box_rect.position = drag_start_box_rect.position + delta
 			queue_redraw()
@@ -248,9 +300,29 @@ func _finalize_measurement() -> void:
 		CaliperType.HEART_RATE:
 			var bpm = int(clamp(60.0 / (cm_dist * 0.15 + 0.4), 48, 175))
 			label = "HR: " + str(bpm) + " BPM"
-		CaliperType.OB_METRICS:
-			var ga_weeks = snapped(cm_dist * 1.8 + 4.0, 0.1)
-			label = "BPD: " + str(snapped(cm_dist, 0.01)) + "cm (" + str(ga_weeks) + "w)"
+		CaliperType.OB_METRICS, CaliperType.OB_BPD:
+			ob_bpd = cm_dist
+			var ga_w = snapped(ob_bpd * 1.8 + 12.0, 0.1)
+			label = "BPD: " + str(snapped(ob_bpd, 0.01)) + "cm (" + str(ga_w) + "w)"
+		CaliperType.OB_FL:
+			ob_fl = cm_dist
+			label = "FL: " + str(snapped(ob_fl, 0.01)) + "cm"
+		CaliperType.OB_AC:
+			ob_ac = cm_dist * 3.14
+			label = "AC: " + str(snapped(ob_ac, 0.01)) + "cm"
+		CaliperType.OB_HC:
+			ob_hc = cm_dist * 3.14
+			label = "HC: " + str(snapped(ob_hc, 0.01)) + "cm"
+		CaliperType.OB_CRL:
+			ob_crl = cm_dist
+			label = "CRL: " + str(snapped(ob_crl, 0.01)) + "cm"
+		CaliperType.VOLUME_3PT:
+			volume_dists.append(cm_dist)
+			label = "D" + str(volume_dists.size()) + ": " + str(snapped(cm_dist, 0.01)) + "cm"
+			if volume_dists.size() >= 3:
+				var vol = volume_dists[0] * volume_dists[1] * volume_dists[2] * 0.5233
+				label += " (Vol: " + str(snapped(vol, 0.1)) + " cm³)"
+				volume_dists.clear()
 			
 	measurements_list.append({
 		"p1": p1,
@@ -276,19 +348,34 @@ func _draw() -> void:
 	
 	var cur_time = cine_frames[cine_index] if (is_frozen and cine_frames.size() > 0) else time_passed
 	
-	match mode:
-		ScanMode.B_MODE:
-			_draw_b_mode(rect, cur_time)
-		ScanMode.COLOR_DOPPLER:
-			_draw_b_mode(rect, cur_time)
-			_draw_color_doppler_overlay(rect, cur_time)
-		ScanMode.PW_DOPPLER:
-			_draw_split_pw_mode(rect, cur_time)
-		ScanMode.M_MODE:
-			_draw_split_m_mode(rect, cur_time)
+	if is_split_screen:
+		# Dual Split-Screen: Left half B-Mode, Right half Color Doppler
+		var half_w = rect.size.x * 0.5
+		var left_rect = Rect2(Vector2.ZERO, Vector2(half_w, rect.size.y))
+		var right_rect = Rect2(Vector2(half_w, 0), Vector2(half_w, rect.size.y))
+		
+		_draw_b_mode(left_rect, cur_time)
+		_draw_b_mode(right_rect, cur_time)
+		_draw_color_doppler_overlay(right_rect, cur_time)
+		draw_line(Vector2(half_w, 0), Vector2(half_w, rect.size.y), Color(0.3, 0.85, 0.95, 0.9), 2.0)
+	else:
+		match mode:
+			ScanMode.B_MODE:
+				_draw_b_mode(rect, cur_time)
+			ScanMode.COLOR_DOPPLER:
+				_draw_b_mode(rect, cur_time)
+				_draw_color_doppler_overlay(rect, cur_time)
+			ScanMode.PW_DOPPLER:
+				_draw_split_pw_mode(rect, cur_time)
+			ScanMode.M_MODE:
+				_draw_split_m_mode(rect, cur_time)
 			
 	_draw_depth_ruler(rect)
 	_draw_left_2d_parameter_block()
+	_draw_tgc_curve(rect)
+	_draw_bodymark_overlay(rect)
+	_draw_probe_system_status(rect)
+	_draw_efast_checklist(rect)
 	_draw_overlays(rect)
 	
 	if is_frozen:
@@ -393,7 +480,7 @@ func _draw_left_2d_parameter_block() -> void:
 	draw_string(font, start_pos + Vector2(0, 82), "P    90", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_col)
 
 func _draw_right_bottom_ob_report_box(rect: Rect2) -> void:
-	# OB Measurement Table overlay on bottom right (Matching image 139645_66778_4746.jpg)
+	# OB Measurement Table overlay on bottom right with Hadlock GA & EFW Equations
 	var font = ThemeDB.fallback_font
 	var box_w = 210.0
 	var box_h = 240.0
@@ -405,23 +492,29 @@ func _draw_right_bottom_ob_report_box(rect: Rect2) -> void:
 	var key_col = Color(0.95, 0.85, 0.15)
 	var val_col = Color(1.0, 1.0, 1.0)
 	
+	# Hadlock EFW (g) Equation: log10(EFW) = 1.3596 - (0.00386*AC*FL) + (0.0468*AC) + (0.139*FL) + (0.00061*BPD*AC)
+	var log10_efw = 1.3596 - (0.00386 * ob_ac * ob_fl) + (0.0468 * ob_ac) + (0.139 * ob_fl) + (0.00061 * ob_bpd * ob_ac)
+	var efw_g = int(clamp(pow(10.0, log10_efw), 120.0, 3800.0))
+	var ga_weeks = int(ob_bpd * 1.8 + 12.0)
+	var ga_days = int(fmod(ob_bpd * 1.8 * 7.0, 7.0))
+	var ga_str = str(ga_weeks) + "w" + str(ga_days) + "d ± 10d"
+	var fl_bpd_pct = snapped((ob_fl / ob_bpd) * 100.0, 0.1)
+	
 	var rows = [
-		["BPD", "5.20 cm"],
-		["GA", "21w5d ± 12d"],
+		["BPD", str(snapped(ob_bpd, 0.01)) + " cm"],
+		["GA (Hadlock)", ga_str],
 		["EDD", "09-09-2021"],
-		["EFW1", "419g"],
-		["GA", "21w2d"],
-		["EDD", "09-12-2021"],
-		["FL/BPD", "65.95 %"],
-		["HC", "18.83 cm"],
-		["GA", "21w1d ± 10d"],
-		["EDD", "09-13-2021"],
-		["HC/AC", "1.13"],
-		["FL/HC", "18.20 %"]
+		["EFW (Hadlock)", str(efw_g) + " g"],
+		["FL", str(snapped(ob_fl, 0.01)) + " cm"],
+		["FL / BPD", str(fl_bpd_pct) + " %"],
+		["HC", str(snapped(ob_hc, 0.01)) + " cm"],
+		["AC", str(snapped(ob_ac, 0.01)) + " cm"],
+		["HC / AC", str(snapped(ob_hc / max(0.1, ob_ac), 0.01))],
+		["CRL", str(snapped(ob_crl, 0.01)) + " cm"]
 	]
 	
 	for i in range(rows.size()):
-		var ry = box_pos.y + 18 + i * 19
+		var ry = box_pos.y + 18 + i * 21
 		var k = rows[i][0]
 		var v = rows[i][1]
 		draw_string(font, Vector2(box_pos.x + 10, ry), k, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, key_col)
@@ -676,3 +769,82 @@ func _draw_calipers_and_annotations() -> void:
 		else:
 			draw_rect(rect_box, Color(0.1, 0.45, 0.45, 0.9), true, 4.0)
 			draw_string(font, pos + Vector2(4, 1), txt, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
+
+func _draw_tgc_curve(rect: Rect2) -> void:
+	if not show_tgc_curve:
+		return
+	var font = ThemeDB.fallback_font
+	var top_y = 70.0
+	var scan_h = rect.size.y - 140.0
+	var tgc_base_x = rect.size.x - 45.0
+	
+	draw_line(Vector2(tgc_base_x, top_y - 10), Vector2(tgc_base_x, top_y + scan_h + 10), Color(0.3, 0.35, 0.4, 0.5), 1.5)
+	
+	var curve_pts = PackedVector2Array()
+	for i in range(6):
+		var ny = top_y + (float(i) / 5.0) * scan_h
+		var offset_x = (tgc_bands[i] - 1.0) * 35.0
+		var pt = Vector2(tgc_base_x + offset_x, ny)
+		curve_pts.append(pt)
+		
+		var col = Color(0.15, 0.85, 0.95, 0.95) if i == active_tgc_node_idx else Color(0.95, 0.85, 0.15, 0.85)
+		draw_circle(pt, 6.0, col)
+		draw_circle(pt, 3.5, Color(0.05, 0.08, 0.12))
+		
+	draw_polyline(curve_pts, Color(0.2, 0.75, 0.95, 0.8), 2.0)
+	draw_string(font, Vector2(tgc_base_x - 12, top_y - 16), "TGC", HORIZONTAL_ALIGNMENT_CENTER, -1, 11, Color(0.8, 0.85, 0.9))
+
+func _draw_bodymark_overlay(rect: Rect2) -> void:
+	if active_bodymark_id <= 0:
+		return
+	var font = ThemeDB.fallback_font
+	var bm_box = Rect2(Vector2(16, rect.size.y - 150), Vector2(100, 85))
+	draw_rect(bm_box, Color(0.0, 0.0, 0.0, 0.65), true)
+	draw_rect(bm_box, Color(0.3, 0.4, 0.5, 0.8), false, 1.5)
+	
+	var name_str = bodymark_names[active_bodymark_id]
+	draw_string(font, bm_box.position + Vector2(6, 18), name_str, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.95, 0.85, 0.15))
+	
+	var center = bm_box.position + Vector2(50, 52)
+	match active_bodymark_id:
+		1:
+			draw_arc(center, 24.0, deg_to_rad(-40.0), deg_to_rad(140.0), 24, Color(0.8, 0.88, 0.95), 2.0)
+			draw_line(center + Vector2(-22, 10), center + Vector2(22, 10), Color(0.8, 0.88, 0.95), 2.0)
+			draw_circle(center + Vector2(-8, -6), 5.0, Color(0.95, 0.25, 0.15))
+		2:
+			draw_circle(center, 18.0, Color(0.7, 0.8, 0.9, 0.4))
+			draw_line(center - Vector2(12, 12), center + Vector2(12, 12), Color(0.95, 0.85, 0.15), 2.0)
+			draw_circle(center - Vector2(8, 8), 5.0, Color(0.95, 0.25, 0.15))
+		3:
+			draw_ellipse(center, 22.0, 14.0, Color(0.75, 0.82, 0.9))
+			draw_circle(center + Vector2(4, 0), 5.0, Color(0.95, 0.25, 0.15))
+		4, 5:
+			draw_rect(Rect2(center - Vector2(20, 12), Vector2(40, 24)), Color(0.8, 0.88, 0.95), false, 2.0)
+			draw_circle(center, 5.0, Color(0.95, 0.25, 0.15))
+
+func _draw_probe_system_status(rect: Rect2) -> void:
+	var font = ThemeDB.fallback_font
+	var status_str = "🔋 92%   🌡️ 36.5°C   📶 5G Wi-Fi"
+	var pos = Vector2(rect.size.x - 240, 36)
+	draw_string(font, pos, status_str, HORIZONTAL_ALIGNMENT_RIGHT, -1, 12, Color(0.85, 0.9, 0.95, 0.9))
+
+func _draw_efast_checklist(rect: Rect2) -> void:
+	if not is_efast_mode:
+		return
+	var font = ThemeDB.fallback_font
+	var box_w = 210.0
+	var box_h = 160.0
+	var box_pos = Vector2(16, 210)
+	
+	draw_rect(Rect2(box_pos, Vector2(box_w, box_h)), Color(0.02, 0.05, 0.1, 0.85), true)
+	draw_rect(Rect2(box_pos, Vector2(box_w, box_h)), Color(0.95, 0.3, 0.2, 0.8), false, 1.5)
+	
+	draw_string(font, box_pos + Vector2(10, 20), "🚑 eFAST PROTOCOL", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(0.95, 0.85, 0.15))
+	
+	for i in range(efast_regions.size()):
+		var ry = box_pos.y + 40 + i * 19
+		var reg = efast_regions[i]
+		var res = efast_results[i]
+		var col = Color(0.2, 0.9, 0.4) if res == "CLEAR" else Color(0.95, 0.25, 0.2)
+		draw_string(font, Vector2(box_pos.x + 10, ry), reg, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.9, 0.95, 1.0))
+		draw_string(font, Vector2(box_pos.x + box_w - 10, ry), "[" + res + "]", HORIZONTAL_ALIGNMENT_RIGHT, -1, 11, col)

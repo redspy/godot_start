@@ -239,7 +239,16 @@ func _setup_ui_signals() -> void:
 	
 	cine_slider.value_changed.connect(func(v): ultrasound_view.cine_index = int(v); ultrasound_view.queue_redraw())
 
+# Popups & Dialogs
+@onready var bodymark_popup: PopupMenu = PopupMenu.new()
+@onready var worklist_dialog: ConfirmationDialog = ConfirmationDialog.new()
+
+var is_fullscreen_mode: bool = false
+
 func _setup_popups() -> void:
+	add_child(bodymark_popup)
+	add_child(worklist_dialog)
+	
 	probe_popup.clear()
 	probe_popup.add_item("🔍 Convex Probe (2-5 MHz Abdominal)", 0)
 	probe_popup.add_item("❤️ Phased Array (1.6-3.7 MHz Cardiac)", 1)
@@ -248,10 +257,14 @@ func _setup_popups() -> void:
 	probe_popup.id_pressed.connect(_on_probe_selected)
 	
 	caliper_popup.clear()
-	caliper_popup.add_item("Distance (D1/D2 cm)", 0)
-	caliper_popup.add_item("Angle (°)", 1)
-	caliper_popup.add_item("Heart Rate (HR BPM)", 2)
-	caliper_popup.add_item("OB Metrics (BPD/GA)", 3)
+	caliper_popup.add_item("📏 Distance (D1/D2 cm)", 0)
+	caliper_popup.add_item("📐 Angle (°)", 1)
+	caliper_popup.add_item("❤️ Heart Rate (HR BPM)", 2)
+	caliper_popup.add_item("👶 OB BPD (Hadlock GA)", 4)
+	caliper_popup.add_item("🦴 OB FL (Femur Length)", 5)
+	caliper_popup.add_item("⭕ OB AC (Abdominal Cir.)", 6)
+	caliper_popup.add_item("🧠 OB HC (Head Cir.)", 7)
+	caliper_popup.add_item("📦 3D Organ Volume (L*W*H)", 9)
 	caliper_popup.id_pressed.connect(_on_caliper_selected)
 	
 	annotation_popup.clear()
@@ -259,6 +272,18 @@ func _setup_popups() -> void:
 	for i in range(labels.size()):
 		annotation_popup.add_item(labels[i], i)
 	annotation_popup.id_pressed.connect(_on_annotation_selected)
+	
+	bodymark_popup.clear()
+	bodymark_popup.add_item("🚫 None (Clear BodyMark)", 0)
+	bodymark_popup.add_item("🫁 Abdomen / Liver", 1)
+	bodymark_popup.add_item("🫀 Heart (PLAX View)", 2)
+	bodymark_popup.add_item("🧬 Kidney", 3)
+	bodymark_popup.add_item("🩸 Carotid Artery", 4)
+	bodymark_popup.add_item("🦋 Thyroid", 5)
+	bodymark_popup.id_pressed.connect(func(id):
+		ultrasound_view.active_bodymark_id = id
+		ultrasound_view.queue_redraw()
+	)
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch or (event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT):
@@ -543,14 +568,77 @@ func _clear_gallery() -> void:
 	for child in gallery_grid.get_children():
 		child.queue_free()
 
-func _on_end_exam_pressed() -> void:
-	export_dialog.dialog_text = "Exam " + exam_manager.current_exam_id + " Concluded.\n\n" + \
-		"Total Captures: " + str(exam_manager.stored_items.size()) + " items\n" + \
-		"Export Protocols:\n" + \
-		" ✅ DICOM Server (PACS): Transmitted\n" + \
-		" ✅ DICOMweb API Cloud (MyImageCloud): Synced\n" + \
-		" ✅ Local Storage: Archived"
-	export_dialog.popup_centered(Vector2i(480, 240))
+func _show_bodymark_menu() -> void:
+	bodymark_popup.position = Vector2i($BottomBar/HBox/AnnotationBtn.global_position) + Vector2i(100, -200)
+	bodymark_popup.popup()
+
+func toggle_fullscreen() -> void:
+	is_fullscreen_mode = not is_fullscreen_mode
+	if is_fullscreen_mode:
+		top_bar.visible = false
+		bottom_bar.visible = false
+		viewport_container.add_theme_constant_override("margin_top", 0)
+		viewport_container.add_theme_constant_override("margin_bottom", 0)
+	else:
+		top_bar.visible = true
+		bottom_bar.visible = true
+		_update_orientation_layout()
+
+func _open_worklist_dialog() -> void:
+	worklist_dialog.title = "DICOM Modality Worklist (MWL) - Select Patient"
+	var dialog_text = "Select a pre-scheduled patient from PACS Worklist:\n\n"
+	for idx in range(exam_manager.worklist_patients.size()):
+		var p = exam_manager.worklist_patients[idx]
+		dialog_text += str(idx + 1) + ". [" + p["id"] + "] " + p["name"] + " (" + p["age"] + ") - " + p["proc"] + "\n"
+	worklist_dialog.dialog_text = dialog_text
+	worklist_dialog.popup_centered(Vector2i(540, 300))
 	
+	if not worklist_dialog.confirmed.is_connected(_on_worklist_confirmed):
+		worklist_dialog.confirmed.connect(_on_worklist_confirmed)
+
+func _on_worklist_confirmed() -> void:
+	var selected_p = exam_manager.worklist_patients[0]
+	exam_manager.start_new_exam(selected_p["name"])
+	patient_name_input.text = selected_p["name"]
+
+func toggle_split_screen() -> void:
+	ultrasound_view.is_split_screen = not ultrasound_view.is_split_screen
+	ultrasound_view.queue_redraw()
+
+func _switch_application_profile(app_id: int) -> void:
+	ultrasound_view.is_efast_mode = false
+	match app_id:
+		0: # OB
+			_on_preset_changed(3) # OB-GYN
+			_on_probe_selected(3) # Endo EV5-9
+			ultrasound_view.depth_cm = 12.0
+		1: # GYN
+			_on_preset_changed(3)
+			_on_probe_selected(3)
+			ultrasound_view.depth_cm = 10.0
+		2: # Abdomen
+			_on_preset_changed(0) # Abdominal
+			_on_probe_selected(0) # Convex CA1-7A
+			ultrasound_view.depth_cm = 8.9
+		3: # POCUS eFAST
+			_on_preset_changed(0)
+			_on_probe_selected(0)
+			ultrasound_view.depth_cm = 16.0
+			ultrasound_view.is_efast_mode = true
+		4: # Cardiac
+			_on_preset_changed(1) # Cardiac
+			_on_probe_selected(1) # Phased PA2-4
+			ultrasound_view.depth_cm = 18.0
+			
+	ultrasound_view.queue_redraw()
+
+func _export_dicom_sr_report() -> void:
+	var sr_txt = exam_manager.generate_dicom_sr_report()
+	export_dialog.dialog_text = sr_txt
+	export_dialog.title = "DICOM Structured Report (SR) Export"
+	export_dialog.popup_centered(Vector2i(580, 380))
+
+func _on_end_exam_pressed() -> void:
+	_export_dicom_sr_report()
 	exam_manager.end_current_exam()
 	exam_manager.start_new_exam(patient_name_input.text if patient_name_input.text != "" else "Anonymous Patient")
