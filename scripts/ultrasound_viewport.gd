@@ -4,7 +4,7 @@ extends Control
 enum TransducerType { CONVEX, PHASED, LINEAR, ENDO }
 enum ScanMode { B_MODE, COLOR_DOPPLER, PW_DOPPLER, M_MODE }
 enum CaliperType { DISTANCE, ANGLE, HEART_RATE, OB_METRICS }
-enum DragState { NONE, MOVE_COLOR_BOX, RESIZE_TL, RESIZE_TR, RESIZE_BL, RESIZE_BR, DRAG_ANNOTATION }
+enum DragState { NONE, MOVE_COLOR_BOX, RESIZE_TL, RESIZE_TR, RESIZE_BL, RESIZE_BR, DRAG_ANNOTATION, ADJUST_GAIN }
 
 @export var transducer: TransducerType = TransducerType.CONVEX
 @export var mode: ScanMode = ScanMode.B_MODE
@@ -15,6 +15,9 @@ enum DragState { NONE, MOVE_COLOR_BOX, RESIZE_TL, RESIZE_TR, RESIZE_BL, RESIZE_B
 @export var show_focus: bool = true
 @export var active_preset: String = "Abdominal"
 @export var flip_horizontal: bool = false
+
+var gn_value: int = 50 # Default 50 (range 0..100)
+var drag_start_gn_value: int = 50
 
 # TGC 6-band controls (0.2 to 1.8)
 var tgc_bands: Array[float] = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
@@ -173,6 +176,13 @@ func _gui_input(event: InputEvent) -> void:
 					is_placing_caliper = false
 					_finalize_measurement()
 					queue_redraw()
+					return
+
+			# Vertical Drag Gain Adjustment for B-Mode & live scanning
+			if not is_frozen:
+				active_drag_state = DragState.ADJUST_GAIN
+				drag_start_mouse_pos = mpos
+				drag_start_gn_value = gn_value
 		else:
 			active_drag_state = DragState.NONE
 			if is_placing_caliper and caliper_points.size() >= 2:
@@ -202,6 +212,11 @@ func _gui_input(event: InputEvent) -> void:
 			queue_redraw()
 		elif active_drag_state == DragState.DRAG_ANNOTATION and selected_annotation_idx >= 0 and selected_annotation_idx < annotations_list.size():
 			annotations_list[selected_annotation_idx]["pos"] = mpos
+			queue_redraw()
+		elif active_drag_state == DragState.ADJUST_GAIN:
+			var dy = drag_start_mouse_pos.y - mpos.y # Drag Up -> dy > 0 (increase GN)
+			gn_value = clamp(drag_start_gn_value + int(dy * 0.35), 0, 100)
+			gain = float(gn_value) / 50.0
 			queue_redraw()
 		elif is_placing_caliper and caliper_points.size() >= 2:
 			caliper_points[1] = mpos
@@ -369,16 +384,13 @@ func _draw_left_2d_parameter_block() -> void:
 	var font = ThemeDB.fallback_font
 	var start_pos = Vector2(16, 80)
 	var text_col = Color(0.9, 0.92, 0.95)
-	var blue_col = Color(0.2, 0.65, 0.95)
 	
 	draw_string(font, start_pos, "[2D]", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, text_col)
 	draw_string(font, start_pos + Vector2(0, 18), "Frq  Gen.", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_col)
-	draw_string(font, start_pos + Vector2(0, 34), "GN   47", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_col)
+	draw_string(font, start_pos + Vector2(0, 34), "GN   " + str(gn_value), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_col)
 	draw_string(font, start_pos + Vector2(0, 50), "DR   46", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_col)
 	draw_string(font, start_pos + Vector2(0, 66), "FA   7", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_col)
 	draw_string(font, start_pos + Vector2(0, 82), "P    90", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, text_col)
-	draw_string(font, start_pos + Vector2(0, 98), "PG  -3", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, blue_col)
-	draw_string(font, start_pos + Vector2(0, 114), "PD  -4", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, blue_col)
 
 func _draw_right_bottom_ob_report_box(rect: Rect2) -> void:
 	# OB Measurement Table overlay on bottom right (Matching image 139645_66778_4746.jpg)

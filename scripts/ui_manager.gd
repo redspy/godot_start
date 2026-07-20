@@ -90,6 +90,10 @@ func _process(_delta: float) -> void:
 	if cur_size != last_view_size:
 		last_view_size = cur_size
 		_update_orientation_layout()
+		
+	if ultrasound_view and gain_slider:
+		if int(gain_slider.value) != ultrasound_view.gn_value:
+			gain_slider.set_value_no_signal(ultrasound_view.gn_value)
 
 func _update_orientation_layout() -> void:
 	var vis_rect = get_viewport().get_visible_rect().size
@@ -204,6 +208,11 @@ func _setup_ui_signals() -> void:
 	
 	preset_option.item_selected.connect(_on_preset_changed)
 	transducer_option.item_selected.connect(_on_transducer_changed)
+	
+	gain_slider.min_value = 0
+	gain_slider.max_value = 100
+	gain_slider.step = 1
+	gain_slider.value = 50
 	gain_slider.value_changed.connect(_on_gain_changed)
 	depth_slider.value_changed.connect(_on_depth_changed)
 	
@@ -451,7 +460,8 @@ func _on_transducer_changed(idx: int) -> void:
 	_on_probe_selected(idx)
 
 func _on_gain_changed(v: float) -> void:
-	ultrasound_view.gain = v
+	ultrasound_view.gn_value = int(v)
+	ultrasound_view.gain = v / 50.0
 	ultrasound_view.queue_redraw()
 
 func _on_depth_changed(v: float) -> void:
