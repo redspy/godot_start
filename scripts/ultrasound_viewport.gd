@@ -416,47 +416,85 @@ func _draw_right_bottom_ob_report_box(rect: Rect2) -> void:
 		draw_string(font, Vector2(box_pos.x + box_w - 10, ry), v, HORIZONTAL_ALIGNMENT_RIGHT, -1, 12, val_col)
 
 func _draw_convex_speckle(apex: Vector2, top_r: float, bottom_r: float, angle_span: float, t: float) -> void:
-	for i in range(200):
+	var dynamic_range_alpha = 316.0 # 50 dB dynamic range log compression alpha
+	for i in range(220):
 		var r = top_r + randf() * (bottom_r - top_r)
 		var frac = randf()
 		var a = deg_to_rad(-angle_span * 0.5 + angle_span * frac + 90.0)
 		var pt = apex + Vector2(cos(a), sin(a)) * r
 		
-		var zone = clamp(int(((r - top_r) / (bottom_r - top_r)) * 6.0), 0, 5)
-		var zone_gain = tgc_bands[zone]
+		# 1. C++ Rayleigh Distribution Envelope: I = sqrt(X^2 + Y^2)
+		var n_x = noise.get_noise_2d(pt.x * 2.5 + t * 4.0, pt.y * 2.5)
+		var n_y = noise.get_noise_2d(pt.x * 2.5 + 500.0, pt.y * 2.5 + t * 4.0)
+		var rayleigh_amplitude = sqrt(n_x * n_x + n_y * n_y)
 		
-		var n_val = noise.get_noise_2d(pt.x * 2.0 + t * 5.0, pt.y * 2.0)
-		if n_val > 0.02:
-			var alpha = clamp((n_val * gain * zone_gain) * 0.75, 0.0, 0.9)
-			draw_circle(pt, 1.2 + n_val * 2.5, Color(0.75, 0.85, 0.85, alpha))
+		if rayleigh_amplitude > 0.01:
+			# 2. C# 6-Band Depth TGC Attenuation Compensation
+			var norm_depth = clamp((r - top_r) / (bottom_r - top_r), 0.0, 1.0)
+			var band_idx = norm_depth * 5.0
+			var b0 = int(band_idx)
+			var b1 = min(b0 + 1, 5)
+			var f_mix = band_idx - float(b0)
+			var tgc_factor = (1.0 - f_mix) * tgc_bands[b0] + f_mix * tgc_bands[b1]
+			
+			var compensated = rayleigh_amplitude * gain * tgc_factor
+			
+			# 3. C# Dynamic Range Logarithmic Compression: I_out = C * log10(1 + alpha * I_in)
+			var log_compressed = log(1.0 + dynamic_range_alpha * compensated) / log(1.0 + dynamic_range_alpha)
+			var alpha_intensity = clamp(log_compressed * 0.85, 0.0, 0.95)
+			
+			draw_circle(pt, 1.1 + log_compressed * 2.2, Color(0.78, 0.88, 0.92, alpha_intensity))
 
 func _draw_speckle_field(left_x: float, top_y: float, width: float, height: float, t: float) -> void:
-	for i in range(180):
+	var dynamic_range_alpha = 316.0
+	for i in range(200):
 		var rx = left_x + randf() * width
 		var ry = top_y + randf() * height
-		var zone = clamp(int(((ry - top_y) / height) * 6.0), 0, 5)
-		var zone_gain = tgc_bands[zone]
 		
-		var n_val = noise.get_noise_2d(rx * 2.0 + t * 5.0, ry * 2.0)
-		if n_val > 0.02:
-			var alpha = clamp((n_val * gain * zone_gain) * 0.75, 0.0, 0.9)
-			draw_circle(Vector2(rx, ry), 1.2 + n_val * 2.5, Color(0.75, 0.85, 0.85, alpha))
+		var n_x = noise.get_noise_2d(rx * 2.5 + t * 4.0, ry * 2.5)
+		var n_y = noise.get_noise_2d(rx * 2.5 + 500.0, ry * 2.5 + t * 4.0)
+		var rayleigh_amplitude = sqrt(n_x * n_x + n_y * n_y)
+		
+		if rayleigh_amplitude > 0.01:
+			var norm_depth = clamp((ry - top_y) / height, 0.0, 1.0)
+			var band_idx = norm_depth * 5.0
+			var b0 = int(band_idx)
+			var b1 = min(b0 + 1, 5)
+			var f_mix = band_idx - float(b0)
+			var tgc_factor = (1.0 - f_mix) * tgc_bands[b0] + f_mix * tgc_bands[b1]
+			
+			var compensated = rayleigh_amplitude * gain * tgc_factor
+			var log_compressed = log(1.0 + dynamic_range_alpha * compensated) / log(1.0 + dynamic_range_alpha)
+			var alpha_intensity = clamp(log_compressed * 0.85, 0.0, 0.95)
+			
+			draw_circle(Vector2(rx, ry), 1.1 + log_compressed * 2.2, Color(0.78, 0.88, 0.92, alpha_intensity))
 
 func _draw_cone_speckle(center_x: float, top_y: float, radius: float, angle_span: float, t: float) -> void:
 	var apex = Vector2(center_x, top_y)
-	for i in range(200):
+	var dynamic_range_alpha = 316.0
+	for i in range(220):
 		var r = randf() * radius
 		var frac = randf()
 		var a = deg_to_rad(-angle_span * 0.5 + angle_span * frac + 90.0)
 		var pt = apex + Vector2(cos(a), sin(a)) * r
 		
-		var zone = clamp(int((r / radius) * 6.0), 0, 5)
-		var zone_gain = tgc_bands[zone]
+		var n_x = noise.get_noise_2d(pt.x * 2.5 + t * 4.0, pt.y * 2.5)
+		var n_y = noise.get_noise_2d(pt.x * 2.5 + 500.0, pt.y * 2.5 + t * 4.0)
+		var rayleigh_amplitude = sqrt(n_x * n_x + n_y * n_y)
 		
-		var n_val = noise.get_noise_2d(pt.x * 2.0 + t * 5.0, pt.y * 2.0)
-		if n_val > 0.02:
-			var alpha = clamp((n_val * gain * zone_gain) * 0.75, 0.0, 0.9)
-			draw_circle(pt, 1.2 + n_val * 2.5, Color(0.75, 0.85, 0.85, alpha))
+		if rayleigh_amplitude > 0.01:
+			var norm_depth = clamp(r / radius, 0.0, 1.0)
+			var band_idx = norm_depth * 5.0
+			var b0 = int(band_idx)
+			var b1 = min(b0 + 1, 5)
+			var f_mix = band_idx - float(b0)
+			var tgc_factor = (1.0 - f_mix) * tgc_bands[b0] + f_mix * tgc_bands[b1]
+			
+			var compensated = rayleigh_amplitude * gain * tgc_factor
+			var log_compressed = log(1.0 + dynamic_range_alpha * compensated) / log(1.0 + dynamic_range_alpha)
+			var alpha_intensity = clamp(log_compressed * 0.85, 0.0, 0.95)
+			
+			draw_circle(pt, 1.1 + log_compressed * 2.2, Color(0.78, 0.88, 0.92, alpha_intensity))
 
 func _draw_color_doppler_overlay(rect: Rect2, t: float) -> void:
 	var vertices = _get_roi_vertices()
